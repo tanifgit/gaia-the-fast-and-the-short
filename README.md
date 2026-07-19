@@ -12,6 +12,17 @@ Two tracks are provided:
 - **Shortest** (code-golf) — a single-line ObjectScript entry in
   [profiles/shortest/](profiles/shortest/).
 
+## Pre-Requisites and Getting Started
+You’ll need Git installed as well as Docker Desktop
+
+Then you can run this to clone the repo and change into the new folder:
+
+```bash
+git clone https://github.com/tanifgit/gaia-the-fast-and-the-short.git
+cd gaia-the-fast-and-the-short
+```
+
+
 ## Quick start
 
 Interactively:
