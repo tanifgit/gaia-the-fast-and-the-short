@@ -1,4 +1,4 @@
-# Gaia DR3 epoch-photometry challenge - scannin data (fast... or short...)
+# Gaia DR3 epoch-photometry challenge - scanning data (fast... or short...)
 
 An entry for InterSystems Employee Programming Challenge (#1). 
 It scans the first twenty Gaia DR3 epoch-photometry archive files,
