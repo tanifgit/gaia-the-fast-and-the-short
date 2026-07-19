@@ -1,0 +1,15 @@
+ROUTINE RunScript
+	#; Default entrypoint for the fastest track.
+	#; IRIS is the orchestrator; Embedded Python is used only to load the
+	#; native C/libdeflate/OpenMP kernel that performs the whole calculation
+	#; while do ^RunScript runs. Nothing is precomputed at build time.
+Run()
+{
+	Set clock = $ZHOROLOG
+	Set scanner = ##class(%SYS.Python).Import("flux_runner")
+	Set matched = scanner.run()
+	Set seconds = $ZHOROLOG - clock
+	Write "Matched sources: ", matched, !
+	Write "Elapsed time: ", seconds, " seconds", !
+	Quit
+}

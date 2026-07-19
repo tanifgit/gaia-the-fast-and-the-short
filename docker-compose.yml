@@ -1,0 +1,18 @@
+services:
+  iris:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    environment:
+      - ISC_CPF_MERGE_FILE=/home/irisowner/dev/merge.cpf
+    ports:
+      - 1972
+      - 52773
+      - 53773
+    volumes:
+      # Primary dev mount kept as-is from the template.
+      - ./:/home/irisowner/dev
+      # Short aliases used only by the code-golf (shortest) profile.
+      - ./data/in:/i:ro
+      - ./data/out:/o

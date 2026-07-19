@@ -1,0 +1,8 @@
+data/out/*.csv
+src/*.so
+__pycache__/
+*.pyc
+.DS_Store
+iris-main.log
+src/RunScript.mac.fastest
+!data/out/.gitkeep
