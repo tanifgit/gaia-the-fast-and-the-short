@@ -1,8 +1,9 @@
 # Shortest (code-golf) profile
 
 A separate, switchable submission profile for the **shortest** track. It is not
-part of the fastest track and must be measured on its own — do not count the
+part of the fastest track and must be measured on its own - do not count the
 native C kernel's source when sizing this profile.
+This leave RunScript.mac at a bare minimum.
 
 ## What it does
 

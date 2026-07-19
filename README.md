@@ -1,9 +1,9 @@
-# Gaia DR3 epoch-photometry challenge — InterSystems IRIS submission
+# Gaia DR3 epoch-photometry challenge - scannin data (fast... or short...)
 
-An open-source IRIS entry for InterSystems Employee Programming Challenge #1
-(contest #47). It scans the first twenty Gaia DR3 epoch-photometry archive files,
-finds sources whose BP or RP flux swings by more than 100 %, and writes them to a
-CSV — all while `do ^RunScript` runs. 
+An entry for InterSystems Employee Programming Challenge (#1). 
+It scans the first twenty Gaia DR3 epoch-photometry archive files,
+finds sources whose BP or RP flux swings by more than 100 %, 
+and writes them to a CSV. 
 
 Two tracks are provided:
 
@@ -112,7 +112,7 @@ exists only so the submission still produces the right CSV everywhere.
 ### A note on Embedded Python and `%SYS.Python`
 
 `%SYS.Python` is excellent as an *orchestration* seam: IRIS stays in control and
-hands one call to native code. It is the wrong place for hot loops — parsing
+hands one call to native code. It is the wrong place for hot loops - parsing
 every flux value in Python would dominate the runtime. This design therefore
 keeps Python to file discovery and a single kernel call, and pushes all per-row
 work into C.
