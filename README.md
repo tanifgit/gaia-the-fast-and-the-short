@@ -7,9 +7,9 @@ and writes them to a CSV.
 
 Two tracks are provided:
 
-- **Fastest** (default) — IRIS orchestrates, Embedded Python loads a native
+- **Fastest** (default) - IRIS orchestrates, Embedded Python loads a native
   C/libdeflate/OpenMP kernel that does the entire calculation and writes the CSV.
-- **Shortest** (code-golf) — a single-line ObjectScript entry in
+- **Shortest** (code-golf) - a single-line ObjectScript (uses Python) entry in
   [profiles/shortest/](profiles/shortest/).
 
 ## Pre-Requisites and Getting Started
