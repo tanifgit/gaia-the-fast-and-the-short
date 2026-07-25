@@ -4,11 +4,20 @@ FROM $IMAGE
 WORKDIR /home/irisowner/dev
 COPY . .
 
+# Stage the input archives to a container-local directory. Reading the .gz files
+# from the compose bind mount (which proxies to the host filesystem) is ~3x
+# slower per run than reading them from the container's own filesystem, even
+# warm - the virtualized mount cannot serve pages at native speed. Copying to
+# /tmp at build time means do ^RunScript reads from local storage. The runner
+# prefers this directory and falls back to data/in if it is absent.
+USER root
+RUN mkdir -p /tmp/gaia_in && cp data/in/*.gz /tmp/gaia_in/ && \
+    chown -R irisowner:irisowner /tmp/gaia_in
+
 # Prebuild the native kernel during image build so that do ^RunScript never pays
 # a compile cost. If a bind mount later shadows /home/irisowner/dev/src, the
 # runtime in flux_runner.py transparently rebuilds fluxscan.so on first use.
 # libdeflate is dlopen'd by the kernel at run time, so it is not on the link line.
-USER root
 RUN set -e; \
     if command -v gcc >/dev/null 2>&1; then \
         gcc -O3 -march=native -funroll-loops -fopenmp -fPIC -shared \

@@ -105,6 +105,29 @@ IRIS (RunScript.mac)
 - The default path never imports Polars, pandas or NumPy, and does no per-row
   work in Python.
 
+### Performance tuning
+
+Profiling showed that gzip decompression accounts for roughly **99% of the runtime**. 
+Scanning the resulting ~1.5 GB of CSV data takes very little time, 
+so parser and buffer optimizations would have little practical impact.
+
+The two changes that made a measurable difference were:
+
+- **Use container-local storage.** Reading the gzip files through the Docker bind mount 
+was about three times slower than reading them from the container filesystem, 
+even with a warm cache. 
+The image therefore copies the inputs to `/tmp/gaia_in` at build time, 
+with `data/in` used as a fallback. This reduced time significantly. 
+
+- **Use all available CPU cores.** libdeflate processes each gzip stream on a single thread, 
+so files are decompressed in parallel. 
+Allowing the scheduler to use every visible core was a little faster than reserving CPU capacity.
+
+Several other approaches were benchmarked but did not produce a reliable improvement: newer or locally built libdeflate versions, Intel ISA-L, `-Ofast`, LTO, PGO, static linking, huge pages, buffer and decompressor reuse, `MAP_POPULATE`, `MAP_SHARED`, and different `read()`/`mmap`/`madvise` combinations.
+
+Cache pre-warming and reducing Python startup overhead only improved the first run. But since the benchmark makes a few runs, later runs already benefit from a warm filesystem cache and loaded Python modules.
+
+
 A pure-Python fallback lives in `flux_runner.py` for environments without a C
 toolchain or libdeflate. It is correct but intentionally not competitive; it
 exists only so the submission still produces the right CSV everywhere.
