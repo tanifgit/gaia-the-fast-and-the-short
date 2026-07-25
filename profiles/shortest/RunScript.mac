@@ -1,2 +1,2 @@
 ROUTINE RunScript
- d $SYSTEM.Python.Run("import os,csv;E=lambda a:(min(v),max(v))if(v:=[x for x in eval(a,{'NaN':0})if x>0])else(0,0);csv.writer(open('/o/r.csv','w')).writerows(['source_id bp_min_flux bp_max_flux rp_min_flux rp_max_flux percentage_change'.split()]+[[s[1],*b[0],*b[1],c]for s in csv.reader(os.popen('zcat /i/*|grep ^[0-9]'))for b in[[E(s[11]),E(s[16])]]for c in[max([0]+[(h-l)/l*100 for l,h in b if l])]if c>100])")
+ d $SYSTEM.Python.Run("import os,csv;csv.writer(open('/o/r.csv','w')).writerows([[s[1],*sum(b,()),r*100]for s in csv.reader(os.popen('zcat /i/*|grep ^[0-9]'))if(b:=[(min(v),max(v))for a in s[11:17:5]for v in[[*filter(None,eval(a,{'NaN':0}))]or[0]]])and(r:=max([0]+[(h-l)/l for l,h in b if l]))>1])")
