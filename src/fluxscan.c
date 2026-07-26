@@ -48,7 +48,9 @@ static deflate_gunzip_fn deflate_gunzip;
 /* Bind the three libdeflate symbols once, before any worker thread starts.
    Returns 0 on success, -1 if the library or a symbol cannot be found. */
 static int deflate_bind(void) {
-    static const char *sonames[] = { "libdeflate.so.0", "libdeflate.so", NULL };
+    static const char *sonames[] = {
+        "libdeflate.so.0", "libdeflate.so.1", "libdeflate.so", NULL
+    };
     void *handle = NULL;
     for (int i = 0; sonames[i] && !handle; i++) {
         handle = dlopen(sonames[i], RTLD_NOW | RTLD_GLOBAL);
@@ -350,7 +352,18 @@ static long byte_size(const char *path) {
  */
 long flux_scan(const char **paths, int count, int threads, const char *out_path) {
     if (count <= 0) return -1;
-    if (deflate_bind() != 0) return -1;
+
+    /* libdeflate is only needed for .gz inputs. After the pre-timing extract()
+       step every input is a plain .csv, so binding libdeflate is not required and
+       must not be a hard failure - a missing/renamed libdeflate soname would
+       otherwise abort a run that never needs to inflate anything. Bind lazily and
+       only fail if an actual .gz is present but libdeflate could not be resolved. */
+    int haveDeflate = (deflate_bind() == 0);
+    if (!haveDeflate) {
+        for (int i = 0; i < count; i++) {
+            if (is_gz(paths[i])) return -1;  /* need inflate but can't */
+        }
+    }
     if (threads > 0) omp_set_num_threads(threads);
 
     outbuf *bufs = calloc((size_t)count, sizeof *bufs);

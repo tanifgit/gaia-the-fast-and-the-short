@@ -16,7 +16,13 @@ from pathlib import Path
 
 _MODULE_DIR = Path(__file__).resolve().parent
 _KERNEL_SRC = _MODULE_DIR / "fluxscan.c"
+# Prebuilt library shipped in the image (may be shadowed by a bind mount).
 _KERNEL_LIB = _MODULE_DIR / "fluxscan.so"
+# Where a *runtime* rebuild writes. This is container-local /tmp, never the bind
+# mount: the source tree is often mounted from the host, 
+# and writing the .so there risks a sync client truncating or locking it
+# between runs. /tmp is always local and safe.
+_KERNEL_LIB_LOCAL = Path("/tmp/gaia_fluxscan.so")
 
 _DEV_ROOT = Path("/home/irisowner/dev")
 MOUNT_IN = _DEV_ROOT / "data" / "in"
@@ -65,7 +71,7 @@ def extract(in_dir: str = "", tmp_dir: str = str(TEMP_DIR)) -> int:
     """Decompress the input archives to plain CSV in tmp_dir.
 
     This is the challenge template's pre-timing "extract files from data/in to
-    data/temp" step:  so doing it here keeps
+    data/temp" step: so doing it here keeps
     it out of the timed calculation. Files are inflated in parallel. Returns the
     number of files extracted.
     """
@@ -105,29 +111,69 @@ def _worker_count() -> int:
     return max(1, cores)
 
 
-def _build_kernel() -> None:
-    """Compile fluxscan.c once. Tries a tuned build, falls back to portable.
+def _usable_lib() -> Path | None:
+    """Return a loadable, up-to-date kernel library, or None if there isn't one.
 
-    libdeflate is loaded by the kernel itself at run time (dlopen), so it is not
-    named on the link line here; we only need libdl and libm.
+    Prefer the prebuilt library shipped in the image; fall back to a runtime build
+    under /tmp. A candidate is accepted only if it:
+
+    * exists and is non-empty,
+    * is at least as new as fluxscan.c - a library older than the source is a
+      *stale build* (e.g. an old .so left in a bind-mounted, host-synced src/
+      tree from a previous version of the kernel). Such a file loads fine but runs
+      obsolete logic, so it is rejected and rebuilt, and
+    * actually dlopen's with its entry point bound - so a truncated, zero-byte, or
+      wrong-arch file is rejected rather than trusted just because the path exists.
+
+    The staleness check is skipped for the /tmp build target, which is always
+    compiled from the current source within the same run.
     """
-    if _KERNEL_LIB.exists():
-        return
+    try:
+        src_mtime = _KERNEL_SRC.stat().st_mtime
+    except OSError:
+        src_mtime = 0
+    for cand in (_KERNEL_LIB, _KERNEL_LIB_LOCAL):
+        if not cand.exists() or cand.stat().st_size == 0:
+            continue
+        if cand is _KERNEL_LIB and cand.stat().st_mtime < src_mtime:
+            continue  # prebuilt lib older than the source: stale, rebuild it
+        try:
+            probe = ctypes.CDLL(str(cand))
+            probe.flux_scan  # entry point present?
+            return cand
+        except (OSError, AttributeError):
+            continue
+    return None
+
+
+def _build_kernel() -> Path:
+    """Ensure a usable fluxscan library exists and return its path.
+
+    If a prebuilt/local library already loads, reuse it. Otherwise compile
+    fluxscan.c to the container-local /tmp path (never the bind mount): tuned
+    build first, portable fallback. libdeflate is dlopen'd by the kernel at run
+    time, so it is not on the link line here; we only need libdl and libm.
+    """
+    existing = _usable_lib()
+    if existing is not None:
+        return existing
+
     import subprocess
 
     common = ["-fopenmp", "-fPIC", "-shared", str(_KERNEL_SRC),
-              "-ldl", "-lm", "-o", str(_KERNEL_LIB)]
+              "-ldl", "-lm", "-o", str(_KERNEL_LIB_LOCAL)]
     tuned = ["gcc", "-O3", "-march=native", "-funroll-loops", *common]
     plain = ["gcc", "-O3", *common]
     try:
         subprocess.run(tuned, check=True)
     except Exception:
         subprocess.run(plain, check=True)
+    return _KERNEL_LIB_LOCAL
 
 
 def _bind_kernel() -> ctypes.CDLL:
-    _build_kernel()
-    lib = ctypes.CDLL(str(_KERNEL_LIB))
+    lib_path = _build_kernel()
+    lib = ctypes.CDLL(str(lib_path))
     lib.flux_scan.restype = ctypes.c_long
     lib.flux_scan.argtypes = [
         ctypes.POINTER(ctypes.c_char_p),  # paths
