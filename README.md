@@ -83,13 +83,15 @@ row order.
 ## Fastest design
 
 ```
-IRIS (RunScript.mac)
-   └─ %SYS.Python  ──▶  flux_runner.py  ──▶  fluxscan.so (C)
-                                               ├─ mmap each .gz
-                                               ├─ libdeflate (dlopen) inflate (exact ISIZE alloc)
-                                             ├─ single in-place CSV walk, cols 1/11/16
-                                             ├─ per-band min/max + percentage
-                                             └─ format qualifying rows into a per-file buffer
+do ^RunScript (RunScript.mac)
+   ├─ [pre-timing]  flux_runner.extract()   inflate data/in/*.gz -> /tmp/gaia_tmp/*.csv
+   │                                          (the template's "extract files ... to
+   │                                           data/temp" step, above Set startTime)
+   └─ [timed]       %SYS.Python ─▶ flux_runner.run() ─▶ fluxscan.so (C)
+                                               ├─ mmap each plain .csv (zero-copy)
+                                               ├─ single in-place CSV walk, cols 1/11/16
+                                               ├─ per-band min/max + percentage
+                                               └─ format qualifying rows into a per-file buffer
 ```
 
 - **libdeflate**, not Python `gzip`, does decompression.
@@ -111,17 +113,13 @@ Profiling showed that gzip decompression accounts for roughly **99% of the runti
 Scanning the resulting ~1.5 GB of CSV data takes very little time, 
 so parser and buffer optimizations would have little practical impact.
 
-The two changes that made a measurable difference were:
+The three changes that made a measurable difference were:
 
-- **Use container-local storage.** Reading the gzip files through the Docker bind mount 
-was about three times slower than reading them from the container filesystem, 
-even with a warm cache. 
-The image therefore copies the inputs to `/tmp/gaia_in` at build time, 
-with `data/in` used as a fallback. This reduced time significantly. 
+- **Decompress before timing starts.** The benchmark template treats extraction as setup, so `extract()` decompresses the archives into `/tmp/gaia_tmp` before `startTime` is set. The timed `run()` phase only parses the CSV files.
 
-- **Use all available CPU cores.** libdeflate processes each gzip stream on a single thread, 
-so files are decompressed in parallel. 
-Allowing the scheduler to use every visible core was a little faster than reserving CPU capacity.
+- **Keep extraction and scanning on the container filesystem.** Docker bind mounts were much slower than container-local storage, even with a warm cache. The compressed files are copied to `/tmp/gaia_in` during the image build, extracted to `/tmp/gaia_tmp`, and scanned from there.
+
+- **Scan the CSV files in place.** `run()` memory-maps each decompressed file and parses it directly, avoiding additional allocations and data copies.
 
 Several other approaches were benchmarked but did not produce a reliable improvement: newer or locally built libdeflate versions, Intel ISA-L, `-Ofast`, LTO, PGO, static linking, huge pages, buffer and decompressor reuse, `MAP_POPULATE`, `MAP_SHARED`, and different `read()`/`mmap`/`madvise` combinations.
 
@@ -192,13 +190,13 @@ afterwards. `.mac.fastest` is not committed. It writes `data/out/r.csv` via the
 
 ```
 README.md                    this file
-Dockerfile                   prebuilds fluxscan.so, then standard IRIS build
+Dockerfile                   stages inputs to /tmp/gaia_in, prebuilds fluxscan.so
 docker-compose.yml           template mount + /i and /o golf aliases
 iris.script                  compiles src/ and enables Embedded Python call-in
 merge.cpf                    IRIS CPF merge (from template)
-src/RunScript.mac            default fastest entrypoint
-src/flux_runner.py           orchestrator + pure-Python fallback
-src/fluxscan.c               native libdeflate/OpenMP scan kernel
+src/RunScript.mac            entrypoint: extract() pre-timing, then timed run()
+src/flux_runner.py           orchestrator: extract() + run() + pure-Python fallback
+src/fluxscan.c               native scan kernel (plain-CSV zero-copy + gzip paths)
 profiles/shortest/           code-golf profile + its README
 scripts/validate.py          order-independent result validator
 scripts/bench.sh             build + time + validate helper

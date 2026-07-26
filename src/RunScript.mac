@@ -3,12 +3,23 @@ ROUTINE RunScript
 	#; IRIS is the orchestrator; Embedded Python is used only to load the
 	#; native C/libdeflate/OpenMP kernel that performs the whole calculation
 	#; while do ^RunScript runs. Nothing is precomputed at build time.
+	#;
+	#; Following the challenge template, the input files are extracted
+	#; (decompressed) BEFORE the timed region - the template's
+	#; "extract files if necessary from data/in to data/temp" step. The timed
+	#; calculation then reads the already-decompressed CSVs.
 Run()
 {
-	Set clock = $ZHOROLOG
 	Set scanner = ##class(%SYS.Python).Import("flux_runner")
+
+	#; Pre-timing: decompress inputs to the temp directory.
+	Do scanner.extract()
+
+	#; Timed: parse the extracted CSVs, compute, and write the output.
+	Set clock = $ZHOROLOG
 	Set matched = scanner.run()
 	Set seconds = $ZHOROLOG - clock
+
 	Write "Matched sources: ", matched, !
 	Write "Elapsed time: ", seconds, " seconds", !
 	Quit

@@ -261,43 +261,9 @@ static int process_record(const char *line, const char *line_end, outbuf *b) {
     return 0;
 }
 
-/* Inflate and scan one file, filling its output buffer. Returns 0 on success. */
-static int scan_one(const char *path, outbuf *b) {
-    int fd = open(path, O_RDONLY);
-    if (fd < 0) return -1;
-
-    struct stat info;
-    if (fstat(fd, &info) != 0) { close(fd); return -1; }
-    size_t comp_len = (size_t)info.st_size;
-    if (comp_len < 18) { close(fd); return -1; } /* smaller than a gzip frame */
-
-    unsigned char *comp = mmap(NULL, comp_len, PROT_READ, MAP_PRIVATE, fd, 0);
-    close(fd);
-    if (comp == MAP_FAILED) return -1;
-
-    /* The gzip trailer's ISIZE (mod 2^32) gives the exact plain size for a
-       single-member stream, so we allocate once with no guessing. */
-    uint32_t isize;
-    memcpy(&isize, comp + comp_len - 4, 4);
-    size_t plain_cap = isize ? (size_t)isize : comp_len * 20;
-
-    char *plain = malloc(plain_cap + 1);
-    if (!plain) { munmap(comp, comp_len); return -1; }
-
-    libdeflate_decompressor *dec = deflate_open();
-    size_t plain_len = 0;
-    int rc = dec ? deflate_gunzip(dec, comp, comp_len,
-                                  plain, plain_cap, &plain_len)
-                 : -1;
-    if (dec) deflate_close(dec);
-    munmap(comp, comp_len);
-    if (rc != 0) { free(plain); return -1; }
-    plain[plain_len] = '\0';
-
-    const char *p   = plain;
-    const char *end = plain + plain_len;
-
-    /* Drop the ECSV "#" comment block, then the single column-header line. */
+/* Scan the decompressed CSV bytes in [p, end): drop the ECSV comment block and
+   the column-header line, then hand each data record to process_record. */
+static int scan_bytes(const char *p, const char *end, outbuf *b) {
     while (p < end && *p == '#') {
         const char *nl = memchr(p, '\n', (size_t)(end - p));
         p = nl ? nl + 1 : end;
@@ -306,17 +272,68 @@ static int scan_one(const char *path, outbuf *b) {
         const char *nl = memchr(p, '\n', (size_t)(end - p));
         p = nl ? nl + 1 : end;
     }
-
-    int failed = 0;
     while (p < end) {
         const char *nl = memchr(p, '\n', (size_t)(end - p));
         const char *line_end = nl ? nl : end;
         if (line_end > p && *p >= '0' && *p <= '9') {
-            if (process_record(p, line_end, b) != 0) { failed = 1; break; }
+            if (process_record(p, line_end, b) != 0) return -1;
         }
         p = nl ? nl + 1 : end;
     }
+    return 0;
+}
 
+/* True when the path names a gzip file (ends in ".gz"). */
+static int is_gz(const char *path) {
+    size_t n = strlen(path);
+    return n >= 3 && path[n - 3] == '.' && path[n - 2] == 'g' && path[n - 1] == 'z';
+}
+
+/* Scan one file, filling its output buffer. Returns 0 on success.
+   A plain (already-decompressed) .csv is scanned in place, zero-copy - this is
+   the fast path used after the pre-timing extract step. A .gz is inflated with
+   libdeflate first. */
+static int scan_one(const char *path, outbuf *b) {
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) return -1;
+
+    struct stat info;
+    if (fstat(fd, &info) != 0) { close(fd); return -1; }
+    size_t fsize = (size_t)info.st_size;
+    if (fsize == 0) { close(fd); return 0; }
+
+    unsigned char *raw = mmap(NULL, fsize, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd);
+    if (raw == MAP_FAILED) return -1;
+
+    if (!is_gz(path)) {
+        /* Plain CSV: scan the mapped bytes directly, no copy, no inflate. */
+        int rc = scan_bytes((const char *)raw, (const char *)raw + fsize, b);
+        munmap(raw, fsize);
+        return rc;
+    }
+
+    if (fsize < 18) { munmap(raw, fsize); return -1; } /* smaller than a gzip frame */
+
+    /* The gzip trailer's ISIZE (mod 2^32) gives the exact plain size for a
+       single-member stream, so we allocate once with no guessing. */
+    uint32_t isize;
+    memcpy(&isize, raw + fsize - 4, 4);
+    size_t plain_cap = isize ? (size_t)isize : fsize * 20;
+
+    char *plain = malloc(plain_cap + 1);
+    if (!plain) { munmap(raw, fsize); return -1; }
+
+    libdeflate_decompressor *dec = deflate_open();
+    size_t plain_len = 0;
+    int rc = dec ? deflate_gunzip(dec, raw, fsize, plain, plain_cap, &plain_len)
+                 : -1;
+    if (dec) deflate_close(dec);
+    munmap(raw, fsize);
+    if (rc != 0) { free(plain); return -1; }
+    plain[plain_len] = '\0';
+
+    int failed = scan_bytes(plain, plain + plain_len, b) != 0;
     free(plain);
     return failed ? -1 : 0;
 }
